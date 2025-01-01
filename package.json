@@ -1,0 +1,11 @@
+{
+  "name": "wp-plugin-bash-generator",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest"
+  },
+  "author": "Carlos Matos",
+  "license": "MIT",
+  "description": ""
+}
