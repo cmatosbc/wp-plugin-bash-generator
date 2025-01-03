@@ -51,6 +51,63 @@ mkdir -p languages
 mkdir -p templates
 mkdir -p tests
 
+# Create initial package.json
+cat > "package.json" << EOL
+{
+    "name": "${PLUGIN_SLUG}",
+    "version": "1.0.0",
+    "description": "WordPress plugin for ${PLUGIN_NAME}",
+    "scripts": {
+        "test": "jest",
+        "build": "webpack --mode production",
+        "start": "webpack --mode development --watch",
+        "build:css": "sass src/css:assets/css --style compressed",
+        "watch:css": "sass src/css:assets/css --watch",
+        "build:all": "npm run build && npm run build:css"
+    },
+    "author": "Carlos Matos",
+    "license": "MIT",
+    "devDependencies": {
+        "@babel/core": "^7.23.0",
+        "@babel/preset-env": "^7.22.20",
+        "babel-loader": "^9.1.3",
+        "sass": "^1.69.0",
+        "webpack": "^5.88.2",
+        "webpack-cli": "^5.1.4"
+    }
+}
+EOL
+
+# Create initial JavaScript files
+cat > "src/js/main.js" << EOL
+// Main frontend JavaScript file
+console.log('Frontend script loaded');
+EOL
+
+cat > "src/js/admin.js" << EOL
+// Admin JavaScript file
+console.log('Admin script loaded');
+EOL
+
+# Create initial SCSS files
+cat > "src/css/main.scss" << EOL
+// Main frontend styles
+.${PLUGIN_SLUG} {
+    &-container {
+        padding: 20px;
+    }
+}
+EOL
+
+cat > "src/css/admin.scss" << EOL
+// Admin styles
+.${PLUGIN_SLUG}-admin {
+    &-container {
+        padding: 20px;
+    }
+}
+EOL
+
 # Create the main plugin file
 cat > "${PLUGIN_SLUG}.php" << EOL
 <?php
@@ -194,15 +251,12 @@ if [ "$GUTENBERG_FLAG" = true ]; then
     sed -i "/apiHooks();/a\        \$this->initGutenberg();" "inc/Core/Plugin.php"
     sed -i "/apiHooks(): void {/i\    /**\n     * Initialize Gutenberg blocks and patterns.\n     */\n    private function initGutenberg(): void\n    {\n        new \\${CLASS_NAME}\\Blocks\\Blocks();\n        // Initialize dynamic blocks\n        new \\${CLASS_NAME}\\Blocks\\Dynamic\\ExampleBlock();\n    }\n\n" "inc/Core/Plugin.php"
 
-    # Create package.json for Gutenberg development
-    cat > "package.json" << EOL
+    # Create temporary file with Gutenberg-specific configuration
+    cat > gutenberg.json << EOL
 {
-    "name": "${PLUGIN_SLUG}",
-    "version": "1.0.0",
-    "description": "Gutenberg blocks and patterns for ${PLUGIN_NAME}",
     "scripts": {
-        "build": "wp-scripts build",
-        "start": "wp-scripts start",
+        "build:blocks": "wp-scripts build",
+        "start:blocks": "wp-scripts start",
         "packages-update": "wp-scripts packages-update",
         "check-engines": "wp-scripts check-engines",
         "lint:js": "wp-scripts lint-js",
@@ -222,12 +276,55 @@ if [ "$GUTENBERG_FLAG" = true ]; then
 }
 EOL
 
-    # Create webpack.config.js
+    # Merge the configurations
+    MERGED_CONTENT=$(jq -s '
+        .[0] as $orig |
+        .[1] as $new |
+        $orig * {
+            scripts: ($orig.scripts + $new.scripts),
+            devDependencies: ($orig.devDependencies + $new.devDependencies)
+        }
+    ' package.json gutenberg.json)
+
+    # Update package.json with merged content
+    echo "$MERGED_CONTENT" > package.json
+
+    # Clean up temporary file
+    rm gutenberg.json
+
+    # Update webpack.config.js to include both standard assets and Gutenberg entries
     cat > "webpack.config.js" << EOL
 const defaultConfig = require('@wordpress/scripts/config/webpack.config');
 const path = require('path');
 
-module.exports = {
+// Standard assets configuration
+const standardConfig = {
+    entry: {
+        'main': './src/js/main.js',
+        'admin': './src/js/admin.js'
+    },
+    output: {
+        filename: '[name].js',
+        path: path.resolve(__dirname, 'assets/js')
+    },
+    module: {
+        rules: [
+            {
+                test: /\.js$/,
+                exclude: /node_modules/,
+                use: {
+                    loader: 'babel-loader',
+                    options: {
+                        presets: ['@babel/preset-env']
+                    }
+                }
+            }
+        ]
+    }
+};
+
+// Gutenberg blocks configuration
+const gutenbergConfig = {
     ...defaultConfig,
     entry: {
         'blocks/index': path.resolve(__dirname, 'src/blocks/index.js'),
@@ -236,216 +333,11 @@ module.exports = {
         'extensions/index': path.resolve(__dirname, 'src/extensions/index.js')
     }
 };
+
+module.exports = [standardConfig, gutenbergConfig];
 EOL
 
-    # Create Blocks.php
-    cat > "inc/Blocks/Blocks.php" << EOL
-<?php
-
-declare(strict_types=1);
-
-namespace ${CLASS_NAME}\\Blocks;
-
-/**
- * Gutenberg blocks handler class.
- */
-class Blocks
-{
-    /**
-     * Initialize Gutenberg blocks.
-     */
-    public function __construct()
-    {
-        add_action('init', [\$this, 'registerBlocks']);
-        add_action('init', [\$this, 'registerBlockPatterns']);
-        add_action('init', [\$this, 'registerBlockStyles']);
-        add_action('init', [\$this, 'registerBlockCategories']);
-        add_action('enqueue_block_editor_assets', [\$this, 'editorAssets']);
-    }
-
-    /**
-     * Register custom blocks.
-     *
-     * @return void
-     */
-    public function registerBlocks(): void
-    {
-        register_block_type(${CLASS_NAME}_PLUGIN_PATH . 'build/blocks');
-    }
-
-    /**
-     * Register block patterns.
-     *
-     * @return void
-     */
-    public function registerBlockPatterns(): void
-    {
-        register_block_pattern_category('${PLUGIN_SLUG}', [
-            'label' => __('${PLUGIN_NAME}', '${PLUGIN_SLUG}')
-        ]);
-    }
-
-    /**
-     * Register custom block styles.
-     *
-     * @return void
-     */
-    public function registerBlockStyles(): void
-    {
-        register_block_style('core/paragraph', [
-            'name' => '${PLUGIN_SLUG}-custom-style',
-            'label' => __('Custom Style', '${PLUGIN_SLUG}'),
-        ]);
-    }
-
-    /**
-     * Register block categories.
-     *
-     * @param array \$categories Array of block categories.
-     * @return array Modified array of block categories.
-     */
-    public function registerBlockCategories(array \$categories): array
-    {
-        return array_merge(
-            \$categories,
-            [
-                [
-                    'slug' => '${PLUGIN_SLUG}',
-                    'title' => __('${PLUGIN_NAME}', '${PLUGIN_SLUG}'),
-                    'icon' => 'wordpress',
-                ],
-            ]
-        );
-    }
-
-    /**
-     * Enqueue editor assets.
-     *
-     * @return void
-     */
-    public function editorAssets(): void
-    {
-        \$asset_file = include ${CLASS_NAME}_PLUGIN_PATH . 'build/blocks/index.asset.php';
-
-        wp_enqueue_script(
-            '${PLUGIN_SLUG}-editor',
-            ${CLASS_NAME}_PLUGIN_URL . 'build/blocks/index.js',
-            \$asset_file['dependencies'],
-            \$asset_file['version']
-        );
-
-        wp_enqueue_style(
-            '${PLUGIN_SLUG}-editor',
-            ${CLASS_NAME}_PLUGIN_URL . 'build/blocks/index.css',
-            [],
-            \$asset_file['version']
-        );
-
-        wp_set_script_translations(
-            '${PLUGIN_SLUG}-editor',
-            '${PLUGIN_SLUG}',
-            ${CLASS_NAME}_PLUGIN_PATH . 'languages'
-        );
-    }
-}
-EOL
-
-    # Create example dynamic block class
-    cat > "inc/Blocks/Dynamic/ExampleBlock.php" << EOL
-<?php
-
-declare(strict_types=1);
-
-namespace ${CLASS_NAME}\\Blocks\\Dynamic;
-
-/**
- * Example dynamic block class.
- */
-class ExampleBlock
-{
-    /**
-     * Block name.
-     */
-    private const BLOCK_NAME = '${PLUGIN_SLUG}/example';
-
-    /**
-     * Initialize the block.
-     */
-    public function __construct()
-    {
-        add_action('init', [\$this, 'register']);
-    }
-
-    /**
-     * Register the dynamic block.
-     *
-     * @return void
-     */
-    public function register(): void
-    {
-        register_block_type(self::BLOCK_NAME, [
-            'api_version' => 3,
-            'editor_script' => '${PLUGIN_SLUG}-editor',
-            'editor_style' => '${PLUGIN_SLUG}-editor',
-            'render_callback' => [\$this, 'render'],
-            'supports' => [
-                'align' => true,
-                'html' => false,
-                'typography' => true,
-                'color' => [
-                    'background' => true,
-                    'text' => true,
-                    'gradients' => true,
-                ],
-            ],
-            'attributes' => [
-                'content' => [
-                    'type' => 'string',
-                    'default' => ''
-                ],
-                'alignment' => [
-                    'type' => 'string',
-                    'default' => 'none'
-                ],
-                'backgroundColor' => [
-                    'type' => 'string'
-                ],
-                'textColor' => [
-                    'type' => 'string'
-                ],
-                'gradient' => [
-                    'type' => 'string'
-                ],
-                'fontSize' => [
-                    'type' => 'string'
-                ]
-            ]
-        ]);
-    }
-
-    /**
-     * Render the dynamic block.
-     *
-     * @param array \$attributes Block attributes.
-     * @param string \$content Block content.
-     * @return string Rendered block content.
-     */
-    public function render(array \$attributes, string \$content): string
-    {
-        \$wrapper_attributes = get_block_wrapper_attributes([
-            'class' => 'wp-block-' . str_replace('/', '-', self::BLOCK_NAME)
-        ]);
-
-        return sprintf(
-            '<div %1$s>%2$s</div>',
-            \$wrapper_attributes,
-            esc_html(\$attributes['content'])
-        );
-    }
-}
-EOL
-
-    # Create example block index.js
+    # Create example block files
     cat > "src/blocks/index.js" << EOL
 import { registerBlockType } from '@wordpress/blocks';
 import {
@@ -529,7 +421,7 @@ registerBlockType('${PLUGIN_SLUG}/example', {
         } = attributes;
         
         const blockProps = useBlockProps({
-            className: \`has-text-align-\${alignment}\`,
+            className: `has-text-align-${alignment}`,
             style: {
                 backgroundColor,
                 color: textColor,
@@ -595,7 +487,6 @@ registerBlockType('${PLUGIN_SLUG}/example', {
 });
 EOL
 
-    # Create block styles
     cat > "src/blocks/style.scss" << EOL
 .wp-block-${PLUGIN_SLUG}-example {
     padding: 2em;
@@ -1201,13 +1092,14 @@ touch "assets/js/frontend.js"
 # Update composer.json PSR-4 autoload
 jq ".autoload.\"psr-4\" = {\"${CLASS_NAME}\\\\\": \"inc/\"}" composer.json > composer.json.tmp && mv composer.json.tmp composer.json
 
-# Run composer dump-autoload
-composer dump-autoload -o
-
 echo "Plugin structure created successfully!"
 echo "Main plugin file: ${PLUGIN_SLUG}.php"
 echo "Namespace updated in composer.json to ${CLASS_NAME}"
 echo ""
 echo "Next steps:"
-echo "1. Activate the plugin in WordPress"
-echo "2. Start customizing the code for your needs"
+echo "1. Run 'composer install' to install dependencies"
+echo "2. Run 'npm install' to install npm dependencies"
+echo "3. Run 'npm run build' to build the assets"
+echo "4. Run 'composer dump-autoload' to update autoload"
+echo "5. Activate the plugin in WordPress"
+echo "6. Start customizing the code for your needs"
