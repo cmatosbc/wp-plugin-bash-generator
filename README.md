@@ -29,7 +29,7 @@ A modern WordPress plugin boilerplate generator that creates a well-structured, 
 
 1. Clone this repository:
 ```bash
-git clone https://github.com/yourusername/wpb.git
+git clone https://github.com/cmatosbc/wp-plugin-bash-generator.git
 ```
 
 2. Make the script executable:
